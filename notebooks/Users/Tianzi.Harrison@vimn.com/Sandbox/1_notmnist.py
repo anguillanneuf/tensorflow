@@ -1,4 +1,4 @@
-# Databricks notebook source exported at Thu, 26 May 2016 21:54:36 UTC
+# Databricks notebook source exported at Fri, 27 May 2016 21:56:45 UTC
 # MAGIC %md Deep Learning
 # MAGIC =============
 # MAGIC 
@@ -295,10 +295,6 @@ check_balances(test_datasets)
 
 # COMMAND ----------
 
-image_size
-
-# COMMAND ----------
-
 def make_arrays(nb_rows, img_size):
   if nb_rows:
     dataset = np.ndarray((nb_rows, img_size, img_size), dtype=np.float32) # square images
@@ -414,6 +410,8 @@ try:
     } # a dictionary
   pickle.dump(save, f, pickle.HIGHEST_PROTOCOL) # this seems like the standard code pickle.dump(), write a pickled representation of obj to the open file object file
   # to understand better, see: https://docs.python.org/3/library/pickle.html#usage
+  # there have been several ways to save pickle files, but not all of them are compatible with all versions of Python, some are not good at compressing data
+  # pickle.HIGHEST_PROTOCOL makes sure that you use the most recent version of compressing
   f.close()
 except Exception as e:
   print('Unable to save data to', pickle_file, ':', e)
@@ -440,7 +438,75 @@ print('Compressed pickle size:', statinfo.st_size)
 
 # COMMAND ----------
 
+import hashlib
+import time
 
+def measure_overlap(a, b):
+  '''a and b are ndarrays of shape (len, 28, 28)'''
+  a.flags.writeable = False; b.flags.writeable = False
+  
+  start = time.clock()
+  
+  a_hashed = [hashlib.sha1(i).hexdigest() for i in a]
+  b_hashed = [hashlib.sha1(i).hexdigest() for i in b]
+  a_set = set(a_hashed)
+  b_set = set(b_hashed)
+  
+  overlap = set.intersection(a_set, b_set)
+  overlap_aInb = filter(lambda x: x in b_set, a_hashed)
+  overlap_bIna = filter(lambda x: x in a_set, b_hashed)
+  
+  return overlap, overlap_aInb, overlap_bIna, time.clock() - start
+
+tv_dups, tInv, vInt, tv_time = measure_overlap(train_dataset, valid_dataset)
+tt_dups, trInte, teIntr, tt_time = measure_overlap(train_dataset, test_dataset)
+
+print("Between Train and Validation: %d overlaps, %d Train in Validation, %d Validation in Train, %.2f sec"%(len(tv_dups), len(tInv), len(vInt), tv_time))
+print("Between Train and Test: %d overlaps, %d Train in Test, %d Test in Train, %.2f sec"%(len(tt_dups), len(trInte), len(teIntr), tt_time))
+
+# COMMAND ----------
+
+def sanitize(a, a_labels, b):
+  '''sanitize a based on b'''
+  start = time.clock()
+  
+  a_hashed = [hashlib.sha1(i).hexdigest() for i in a]
+  b_hashed = [hashlib.sha1(i).hexdigest() for i in b]
+  aNotInb = ~ np.in1d(a_hashed, b_hashed)
+  
+#   b_set = set([hashlib.sha1(i).hexdigest() for i in b])
+#   a_dict = dict(zip(a_hashed, a))
+#   aNotInb = filter(lambda x: x not in b_set, a_hashed)
+#   a_sanitized = { k: a_dict[k] for k in aNotInb }
+
+  return a[aNotInb], a_labels[aNotInb], time.clock() - start
+
+valid_snt, valid_labels_snt, vt = sanitize(valid_dataset, valid_labels, train_dataset)
+test_snt, test_labels_snt, tt = sanitize(test_dataset, test_labels, train_dataset)
+
+print("Sanitized Validation dataset contains %d images, %.2f sec"%(len(valid_snt), vt))
+print("Sanitized Test dataset contains %d images, %.2f sec"%(len(test_snt), tt))
+
+# COMMAND ----------
+
+# compress images from 28 by 28 to 14 by 14
+train_small = np.array([np.round(ndimage.zoom(i, .5), 1) for i in train_dataset])
+valid_small = np.array([np.round(ndimage.zoom(i, .5), 1) for i in valid_dataset])
+test_small = np.array([np.round(ndimage.zoom(i, .5), 1) for i in test_dataset])
+
+# COMMAND ----------
+
+tv_dups, tInv, vInt, tv_time = measure_overlap(train_small, valid_small)
+tt_dups, trInte, teIntr, tt_time = measure_overlap(train_small, test_small)
+
+print("Between reduced Train and Validation: %d overlaps, %d Train in Validation, %d Validation in Train, %.2f sec"%(len(tv_dups), len(tInv), len(vInt), tv_time))
+print("Between reduced Train and Test: %d overlaps, %d Train in Test, %d Test in Train, %.2f sec"%(len(tt_dups), len(trInte), len(teIntr), tt_time))
+
+valid_small_snt, valid_small_labels_snt, vt = sanitize(valid_small, valid_labels, train_small)
+test_small_snt, test_small_labels_snt, tt = sanitize(test_small, test_labels, train_small)
+
+print("Sanitized Validation dataset contains %d images, %.2f sec"%(len(valid_small_snt), vt))
+print("Sanitized Test dataset contains %d images, %.2f sec"%(len(test_small_snt), tt))
 
 # COMMAND ----------
 
@@ -455,3 +521,50 @@ print('Compressed pickle size:', statinfo.st_size)
 # MAGIC Optional question: train an off-the-shelf model on all the data!
 # MAGIC 
 # MAGIC ---
+
+# COMMAND ----------
+
+def simpleModel(data, labels, size):
+  '''data is of shape (size, width, height)'''
+  data = data.reshape(len(data), -1) # this reshapes the data into (size, width*height)
+  r_list = np.random.choice(len(data), size, False)
+  lr = LogisticRegression()
+  lr.fit(data[r_list], labels[r_list])
+  return lr, data[r_list], labels[r_list]
+
+# COMMAND ----------
+
+s0, s1, s2, s3, s4 = [], [], [], [], []
+myrange = [50, 100, 500, 1000, 5000]
+for size in myrange:
+  myfit, train_x, label_x = simpleModel(train_dataset, train_labels, size)
+  s0.append(myfit.score(train_x.reshape(len(train_x), -1), label_x))
+  s1.append(myfit.score(valid_dataset.reshape(len(valid_dataset), -1), valid_labels))
+  s2.append(myfit.score(test_dataset.reshape(len(test_dataset), -1), test_labels))
+  s3.append(myfit.score(valid_snt.reshape(len(valid_snt), -1), valid_labels_snt))
+  s4.append(myfit.score(test_snt.reshape(len(test_snt), -1), test_labels_snt))
+
+# COMMAND ----------
+
+fig, ax = plt.subplots()
+ax.plot(myrange, s0, myrange, s1, myrange, s2, myrange, s3, myrange, s4)
+ax.legend(labels = ['Train', 'Validation', 'Test', 'Sanitized Validation', 'Sanitized Test'], loc = 4)
+display(fig)
+
+# COMMAND ----------
+
+ss0, ss1, ss2, ss3, ss4 = [], [], [], [], []
+for size in myrange:
+  myfit, train_x, label_x = simpleModel(train_small, train_labels, size)
+  ss0.append(myfit.score(train_x.reshape(len(train_x), -1), label_x))
+  ss1.append(myfit.score(valid_small.reshape(len(valid_small), -1), valid_labels))
+  ss2.append(myfit.score(test_small.reshape(len(test_small), -1), test_labels))
+  ss3.append(myfit.score(valid_small_snt.reshape(len(valid_small_snt), -1), valid_small_labels_snt))
+  ss4.append(myfit.score(test_small_snt.reshape(len(test_small_snt), -1), test_small_labels_snt))
+
+# COMMAND ----------
+
+fig, ax = plt.subplots()
+ax.plot(myrange, ss0, myrange, ss1, myrange, ss2, myrange, ss3, myrange, ss4)
+ax.legend(labels = ['Validation', 'Test', 'Sanitized Validation', 'Sanitized Test'], loc = 4)
+display(fig)
