@@ -1,4 +1,4 @@
-# Databricks notebook source exported at Fri, 27 May 2016 21:56:45 UTC
+# Databricks notebook source exported at Mon, 6 Jun 2016 15:10:06 UTC
 # MAGIC %md Deep Learning
 # MAGIC =============
 # MAGIC 
@@ -11,8 +11,7 @@
 
 # COMMAND ----------
 
-# These are all the modules we'll be using later. Make sure you can import them
-# before proceeding further.
+# These are all the modules we'll be using later. Make sure you can import them before proceeding further.
 from __future__ import print_function
 import matplotlib.pyplot as plt
 import numpy as np
@@ -530,7 +529,7 @@ def simpleModel(data, labels, size):
   r_list = np.random.choice(len(data), size, False)
   lr = LogisticRegression()
   lr.fit(data[r_list], labels[r_list])
-  return lr, data[r_list], labels[r_list]
+  return lr, data[r_list], labels[r_list] # return the model, the data, and the predictions
 
 # COMMAND ----------
 
